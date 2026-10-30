@@ -339,6 +339,10 @@ textarea { min-height: 140px; resize: vertical; line-height: 1.45; }
 .score-list strong { display: block; font-size: 20px; letter-spacing: -0.04em; }
 .score-list span { color: #8ea0b8; font-size: 12px; }
 .score-list a { font-size: 13px; padding: 8px 4px; }
+.score-list.board { list-style: none; }
+.who-score { display: flex; align-items: center; gap: 12px; }
+.rank { width: 1.5rem; color: #8292a8; font-variant-numeric: tabular-nums; }
+.score-list li.you { border-color: #1e4a4a; background: #10241f; }
 
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -352,6 +356,7 @@ code {
   .stats { gap: 18px; }
   .pill { font-size: 9px; padding: 6px 8px; }
   .score-list li { align-items: flex-start; flex-direction: column; }
+  .score-list.board li { flex-direction: row; align-items: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

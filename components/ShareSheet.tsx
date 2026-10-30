@@ -260,11 +260,7 @@ export function ShareSheet({
                 </a>
               )}
             </>
-          ) : (
-            <p className="hint">
-              X posting needs an approved X app. Add the credentials in <code>.env.local</code>.
-            </p>
-          )}
+          ) : null}
         </div>
 
         {canPostDeso && (

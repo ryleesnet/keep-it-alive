@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GameCanvas, type GameHandle } from "@/components/GameCanvas";
+import { HighScoresDialog } from "@/components/HighScoresDialog";
 import { ScoresDialog } from "@/components/ScoresDialog";
 import { ShareSheet } from "@/components/ShareSheet";
-import { decodeChallenge } from "@/lib/challenge";
+import { challengeFromParams, decodeChallenge } from "@/lib/challenge";
 import {
   desoErrorMessage,
   fetchDesoProfile,
@@ -24,6 +25,7 @@ import {
   subscribePending,
   writeLastRun,
 } from "@/lib/storage";
+import { currentPlayerId, submitHighScore } from "@/lib/submit-high-score";
 import type { Challenge, DesoUser, RunResult, XStatus } from "@/lib/types";
 
 type Phase = "intro" | "playing" | "over";
@@ -48,7 +50,7 @@ async function loadXStatus(): Promise<XStatus> {
 export function KeepAliveApp() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const challenge = decodeChallenge(searchParams.get("c"));
+  const challenge = decodeChallenge(searchParams.get("c")) ?? challengeFromParams(searchParams);
   const gameRef = useRef<GameHandle>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
   const nearRef = useRef<HTMLSpanElement>(null);
@@ -65,6 +67,7 @@ export function KeepAliveApp() {
   const [lastResult, setLastResult] = useState<RunResult | null>(null);
   const [share, setShare] = useState<RunResult | null>(null);
   const [scoresOpen, setScoresOpen] = useState(false);
+  const [highScoresOpen, setHighScoresOpen] = useState(false);
   const [user, setUser] = useState<DesoUser | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [xStatus, setXStatus] = useState<XStatus>(EMPTY_X);
@@ -85,8 +88,21 @@ export function KeepAliveApp() {
   }
 
   useEffect(() => {
-    allowHotkeysRef.current = !share && !scoresOpen;
-  }, [share, scoresOpen]);
+    allowHotkeysRef.current = !share && !scoresOpen && !highScoresOpen;
+  }, [share, scoresOpen, highScoresOpen]);
+
+  useEffect(() => {
+    if (best.seconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      void submitHighScore({
+        seconds: best.seconds,
+        near: best.near,
+        username: user?.username,
+        publicKey: user?.publicKey,
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [best.near, best.seconds, user?.publicKey, user?.username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -152,6 +168,7 @@ export function KeepAliveApp() {
     if (next === "playing") {
       setShare(null);
       setScoresOpen(false);
+      setHighScoresOpen(false);
     }
   }
 
@@ -203,6 +220,9 @@ export function KeepAliveApp() {
           KEEP <span>IT</span> ALIVE
         </div>
         <div className="auth">
+          <button className="secondary slim" type="button" onClick={() => setHighScoresOpen(true)}>
+            High scores
+          </button>
           {user ? (
             <>
               <span className="who">
@@ -393,6 +413,15 @@ export function KeepAliveApp() {
         />
       )}
       {scoresOpen && user && <ScoresDialog user={user} onClose={() => setScoresOpen(false)} />}
+      {highScoresOpen && (
+        <HighScoresDialog
+          youIds={[
+            currentPlayerId() ? `guest:${currentPlayerId()}` : "",
+            user ? `deso:${user.publicKey}` : "",
+          ].filter(Boolean)}
+          onClose={() => setHighScoresOpen(false)}
+        />
+      )}
     </main>
   );
 }

@@ -33,9 +33,6 @@ export function encodeChallenge(challenge: Challenge): string {
   if (challenge.username && USERNAME.test(challenge.username)) {
     packed.u = challenge.username;
   }
-  if (challenge.publicKey && PUBLIC_KEY.test(challenge.publicKey)) {
-    packed.p = challenge.publicKey;
-  }
   return toBase64Url(JSON.stringify(packed));
 }
 
@@ -62,6 +59,19 @@ export function challengeLink(origin: string, challenge: Challenge): string {
   const url = new URL("/", origin);
   url.searchParams.set("c", encodeChallenge(challenge));
   return url.toString();
+}
+
+export function challengeFromParams(params: { get(name: string): string | null }): Challenge | null {
+  const raw = params.get("score");
+  if (!raw) return null;
+  const score = Number(raw);
+  if (!Number.isFinite(score) || score < 0 || score > 86400) return null;
+  const username = params.get("player") ?? undefined;
+  return {
+    score: Number(formatScore(score)),
+    near: 0,
+    username: username && USERNAME.test(username) ? username : undefined,
+  };
 }
 
 function formatScore(value: number): string {
