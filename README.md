@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# KEEP IT ALIVE
 
-## Getting Started
+An endless survival game. Drag the orb, dodge the hazards, and see how many seconds you last. Log in with DeSo to post the score and challenge a friend to beat it. Connecting an X account posts the same challenge there too.
 
-First, run the development server:
+## Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). DeSo login works without extra keys. Copy `.env.example` to `.env.local` if you want a custom DeSo node or X posting.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Play
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Drag, or use arrow keys / WASD. Space or Enter starts a run. The score is how long you survive. Near misses are hazards that pass close without hitting you. Your best time stays in this browser.
 
-## Learn More
+A challenge link looks like `/?c=...`. Opening it shows the time to beat. If you last longer, the result screen says you took the lead and the post can mention that player.
 
-To learn more about Next.js, take a look at the following resources:
+## DeSo
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Log in with DeSo** opens [identity.deso.org](https://identity.deso.org). The app asks for permission to submit posts, with a small spending cap (0.02 DESO) that covers network fees. You can skip buying DESO during signup and still play. Posting itself needs a little DESO in the wallet for the fee.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Post score** publishes a DeSo post with the time, near misses, a challenge link, and `#KeepItAlive`. You can mention a friend’s username. Their public profile is looked up before the mention is included. Posted runs show up under **Scores**, where you can copy the challenge link again.
 
-## Deploy on Vercel
+Posts are tagged in `PostExtraData` with `App=KeepItAlive` so the scores list can find them later.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## X
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Create an app in the X developer portal with OAuth 2.0 and user authentication. The callback URL has to match `X_REDIRECT_URI` exactly. Request scopes are `tweet.write`, `users.read`, and `offline.access`.
+
+```bash
+cp .env.example .env.local
+```
+
+Fill in `X_CLIENT_ID`, `X_CLIENT_SECRET` (if the app is confidential), `X_REDIRECT_URI`, and `X_TOKEN_SECRET` (16+ random characters). Restart the dev server. **Connect X** sends the player through X login. The access token stays in an encrypted httpOnly cookie and is never sent to the browser as JavaScript.
+
+X posts include the score and challenge link. They do not @mention DeSo usernames, since that name belongs to a different network. DeSo mentions stay on the DeSo post.
