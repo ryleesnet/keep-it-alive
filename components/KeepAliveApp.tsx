@@ -56,6 +56,7 @@ export function KeepAliveApp() {
   const nearRef = useRef<HTMLSpanElement>(null);
   const timeStatRef = useRef<HTMLDivElement>(null);
   const allowHotkeysRef = useRef(true);
+  const accountRef = useRef<HTMLDivElement>(null);
   const best = useSyncExternalStore(subscribeBest, getBestSnapshot, getBestServerSnapshot);
   const pendingRun = useSyncExternalStore(subscribePending, getPendingSnapshot, getPendingServerSnapshot);
   const xFlag = searchParams.get("x");
@@ -69,6 +70,7 @@ export function KeepAliveApp() {
   const [scoresOpen, setScoresOpen] = useState(false);
   const [highScoresOpen, setHighScoresOpen] = useState(false);
   const [user, setUser] = useState<DesoUser | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [xStatus, setXStatus] = useState<XStatus>(EMPTY_X);
   const [notice, setNotice] = useState<PostNotice | null>(null);
@@ -146,6 +148,24 @@ export function KeepAliveApp() {
   }, []);
 
   useEffect(() => {
+    if (!accountOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && accountRef.current?.contains(target)) return;
+      setAccountOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAccountOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [accountOpen]);
+
+  useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 5200);
     return () => window.clearTimeout(timer);
@@ -175,6 +195,7 @@ export function KeepAliveApp() {
       setShare(null);
       setScoresOpen(false);
       setHighScoresOpen(false);
+      setAccountOpen(false);
     }
   }
 
@@ -203,6 +224,7 @@ export function KeepAliveApp() {
   }
 
   async function logout() {
+    setAccountOpen(false);
     setAuthBusy(true);
     try {
       const done = await logoutDeSo();
@@ -229,24 +251,9 @@ export function KeepAliveApp() {
           <button className="secondary slim" type="button" onClick={() => setHighScoresOpen(true)}>
             High scores
           </button>
-          {user ? (
-            <>
-              <span className="who">
-                {/* DeSo picture URLs redirect through the node, so they stay a plain image. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={profilePictureUrl(user.publicKey, user.username)} alt="" width={28} height={28} />
-                <span>{user.username ? `@${user.username}` : shortKey(user.publicKey)}</span>
-              </span>
-              <button className="secondary slim" type="button" onClick={() => setScoresOpen(true)}>
-                Scores
-              </button>
-              <button className="text-btn" type="button" onClick={() => void logout()} disabled={authBusy}>
-                Log out
-              </button>
-            </>
-          ) : (
-            <button className="primary slim" type="button" onClick={() => void login()} disabled={authBusy}>
-              {authBusy ? "Opening DeSo…" : "Log in with DeSo"}
+          {user && (
+            <button className="secondary slim" type="button" onClick={() => setScoresOpen(true)}>
+              Scores
             </button>
           )}
           {xStatus.configured &&
@@ -257,6 +264,41 @@ export function KeepAliveApp() {
                 Connect X
               </a>
             ))}
+          {user ? (
+            <div className="account" ref={accountRef}>
+              <button
+                className="who"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+                aria-controls="account-menu"
+                onClick={() => setAccountOpen((open) => !open)}
+              >
+                {/* DeSo picture URLs redirect through the node, so they stay a plain image. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={profilePictureUrl(user.publicKey, user.username)} alt="" width={28} height={28} />
+                <span>{user.username ? `@${user.username}` : shortKey(user.publicKey)}</span>
+                <span className={accountOpen ? "caret open" : "caret"} aria-hidden="true" />
+              </button>
+              {accountOpen && (
+                <div className="account-menu" id="account-menu" role="menu">
+                  <button
+                    className="account-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void logout()}
+                    disabled={authBusy}
+                  >
+                    Log out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button className="primary slim" type="button" onClick={() => void login()} disabled={authBusy}>
+              {authBusy ? "Opening DeSo…" : "Log in with DeSo"}
+            </button>
+          )}
         </div>
       </header>
 

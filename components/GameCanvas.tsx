@@ -37,6 +37,7 @@ type Sim = {
   frame: number;
   nearCooldown: number;
   pointerDown: boolean;
+  desktop: boolean;
 };
 
 export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
@@ -78,6 +79,7 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       frame: 0,
       nearCooldown: 0,
       pointerDown: false,
+      desktop: false,
     };
 
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -127,8 +129,10 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
     };
 
     const addHazard = () => {
+      const hard = sim.desktop;
       const edge = Math.floor(Math.random() * 4);
       const pad = 18;
+      const sideAim = hard ? 0.02 : 0.012;
       let x = 0;
       let y = 0;
       let vx = 0;
@@ -136,39 +140,47 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       if (edge === 0) {
         x = Math.random() * sim.W;
         y = -pad;
-        vx = (sim.player.x - x) * (0.12 + Math.random() * 0.06);
-        vy = 1 + Math.random() * 0.7;
+        vx = (sim.player.x - x) * (hard ? 0.15 + Math.random() * 0.06 : 0.12 + Math.random() * 0.06);
+        vy = hard ? 1.2 + Math.random() * 0.85 : 1 + Math.random() * 0.7;
       } else if (edge === 1) {
         x = sim.W + pad;
         y = Math.random() * sim.H;
-        vx = -(1.1 + Math.random());
-        vy = (sim.player.y - y) * 0.012;
+        vx = -(hard ? 1.25 + Math.random() : 1.1 + Math.random());
+        vy = (sim.player.y - y) * sideAim;
       } else if (edge === 2) {
         x = Math.random() * sim.W;
         y = sim.H + pad;
-        vx = (sim.player.x - x) * 0.012;
-        vy = -(1.1 + Math.random());
+        vx = (sim.player.x - x) * sideAim;
+        vy = -(hard ? 1.25 + Math.random() : 1.1 + Math.random());
       } else {
         x = -pad;
         y = Math.random() * sim.H;
-        vx = 1.1 + Math.random();
-        vy = (sim.player.y - y) * 0.012;
+        vx = hard ? 1.25 + Math.random() : 1.1 + Math.random();
+        vy = (sim.player.y - y) * sideAim;
       }
-      const speed = 1 + Math.min(sim.elapsed / 28, 2.5);
+      const speed = hard ? 1.15 + Math.min(sim.elapsed / 22, 3) : 1 + Math.min(sim.elapsed / 28, 2.5);
       sim.hazards.push({
         x,
         y,
         vx: vx * speed,
         vy: vy * speed,
-        r: 5 + Math.random() * 5,
+        r: hard ? 6 + Math.random() * 6 : 5 + Math.random() * 5,
         phase: Math.random() * 6.28,
       });
+    };
+
+    const hazardCount = () => {
+      if (!sim.desktop) return 1;
+      let count = 1;
+      if (sim.elapsed > 8 && Math.random() < 0.45) count += 1;
+      if (sim.elapsed > 18 && sim.W >= 1000) count += 1;
+      return count;
     };
 
     const reset = () => {
       sim.elapsed = 0;
       sim.near = 0;
-      sim.spawn = 0.45;
+      sim.spawn = sim.desktop ? 0.28 : 0.45;
       sim.hazards = [];
       sim.particles = [];
       sim.shake = 0;
@@ -358,11 +370,28 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
         sim.player.y += (sim.player.ty - sim.player.y) * Math.min(1, dt * 10);
         sim.spawn -= dt;
         if (sim.spawn <= 0) {
-          addHazard();
-          sim.spawn = Math.max(0.19, 0.78 - sim.elapsed * 0.008) + Math.random() * 0.24;
+          const count = hazardCount();
+          for (let n = 0; n < count; n += 1) addHazard();
+          sim.spawn = sim.desktop
+            ? Math.max(0.12, 0.55 - sim.elapsed * 0.009) + Math.random() * 0.16
+            : Math.max(0.19, 0.78 - sim.elapsed * 0.008) + Math.random() * 0.24;
         }
         for (let i = sim.hazards.length - 1; i >= 0; i -= 1) {
           const hazard = sim.hazards[i];
+          if (sim.desktop && sim.elapsed > 12) {
+            const dx = sim.player.x - hazard.x;
+            const dy = sim.player.y - hazard.y;
+            const dist = Math.hypot(dx, dy);
+            const reach = 340;
+            if (dist > 1 && dist < reach) {
+              const ramp = Math.min(1, (sim.elapsed - 12) / 26);
+              const falloff = (1 - dist / reach) ** 2;
+              const steer = (0.006 + 0.018 * ramp) * falloff;
+              const speedNow = Math.hypot(hazard.vx, hazard.vy) || 0.001;
+              hazard.vx += ((dx / dist) * speedNow - hazard.vx) * steer;
+              hazard.vy += ((dy / dist) * speedNow - hazard.vy) * steer;
+            }
+          }
           hazard.x += hazard.vx;
           hazard.y += hazard.vy;
           if (hazard.x < -45 || hazard.x > sim.W + 45 || hazard.y < -45 || hazard.y > sim.H + 45) {
@@ -393,9 +422,15 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       raf = requestAnimationFrame(loop);
     };
 
+    const desktopMedia = window.matchMedia("(pointer: fine) and (hover: hover)");
+    const syncDesktop = () => {
+      sim.desktop = desktopMedia.matches;
+    };
     const observer = new ResizeObserver(resize);
     observer.observe(arena);
+    syncDesktop();
     resize();
+    desktopMedia.addEventListener("change", syncDesktop);
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
@@ -407,6 +442,7 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       alive = false;
       cancelAnimationFrame(raf);
       observer.disconnect();
+      desktopMedia.removeEventListener("change", syncDesktop);
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
