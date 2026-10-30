@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { GameCanvas, type GameHandle } from "@/components/GameCanvas";
 import { HighScoresDialog } from "@/components/HighScoresDialog";
 import { ScoresDialog } from "@/components/ScoresDialog";
-import { ShareSheet } from "@/components/ShareSheet";
+import { ShareSheet, type PostNotice } from "@/components/ShareSheet";
 import { challengeFromParams, decodeChallenge } from "@/lib/challenge";
 import {
   desoErrorMessage,
@@ -71,14 +71,20 @@ export function KeepAliveApp() {
   const [user, setUser] = useState<DesoUser | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [xStatus, setXStatus] = useState<XStatus>(EMPTY_X);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<PostNotice | null>(null);
   const [flagSeen, setFlagSeen] = useState<string | null>(null);
   const [didRestore, setDidRestore] = useState(false);
 
   const flagKey = xFlag ? `${xFlag}:${xReason ?? ""}` : null;
   if (flagKey && flagSeen !== flagKey) {
     setFlagSeen(flagKey);
-    setNotice(xFlag === "connected" ? "X account connected." : xFlag === "error" ? xErrorMessage(xReason) : null);
+    setNotice(
+      xFlag === "connected"
+        ? { text: "X account connected.", ok: true }
+        : xFlag === "error"
+          ? { text: xErrorMessage(xReason), ok: false }
+          : null
+    );
   }
   if (pendingRun && !didRestore) {
     setDidRestore(true);
@@ -190,7 +196,7 @@ export function KeepAliveApp() {
         }));
       }
     } catch (error) {
-      setNotice(desoErrorMessage(error));
+      setNotice({ text: desoErrorMessage(error), ok: false });
     } finally {
       setAuthBusy(false);
     }
@@ -202,7 +208,7 @@ export function KeepAliveApp() {
       const done = await logoutDeSo();
       if (done) setUser(null);
     } catch (error) {
-      setNotice(desoErrorMessage(error));
+      setNotice({ text: desoErrorMessage(error), ok: false });
     } finally {
       setAuthBusy(false);
     }
@@ -255,8 +261,16 @@ export function KeepAliveApp() {
       </header>
 
       {notice && (
-        <div className="notice" role="status">
-          {notice}
+        <div className={notice.ok ? "notice" : "notice warn"} role="status">
+          {notice.text}
+          {notice.href && (
+            <>
+              {" "}
+              <a href={notice.href} target="_blank" rel="noopener noreferrer">
+                {notice.hrefLabel || "View post"}
+              </a>
+            </>
+          )}
         </div>
       )}
 
@@ -410,6 +424,7 @@ export function KeepAliveApp() {
           onClose={() => setShare(null)}
           onLogin={() => void login()}
           onXChange={() => void loadXStatus().then(setXStatus)}
+          onPosted={setNotice}
         />
       )}
       {scoresOpen && user && <ScoresDialog user={user} onClose={() => setScoresOpen(false)} />}

@@ -1,17 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { APP_TAG, desoPostUrl } from "@/lib/constants";
 import { challengeLink } from "@/lib/challenge";
 import { desoErrorMessage, publishScore } from "@/lib/deso-client";
+import { USERNAME } from "@/lib/deso-node";
 import { beatScore, formatSeconds, profilePictureUrl } from "@/lib/format";
 import { buildPosts } from "@/lib/post-copy";
 import { markPendingShare, writeLastRun } from "@/lib/storage";
 import type { Challenge, DesoUser, RunResult, XStatus } from "@/lib/types";
 
-type Friend = { username?: string; publicKey: string };
+const MAX_FRIENDS = 8;
 
-type DestinationResult = { ok: boolean; url?: string; error?: string };
+type Friend = { username: string; publicKey: string };
+
+type Suggestion = { username: string; publicKey: string; description?: string };
+
+export type PostNotice = {
+  text: string;
+  ok: boolean;
+  href?: string;
+  hrefLabel?: string;
+};
 
 export function ShareSheet({
   result,
@@ -22,6 +32,7 @@ export function ShareSheet({
   onClose,
   onLogin,
   onXChange,
+  onPosted,
 }: {
   result: RunResult;
   user: DesoUser | null;
@@ -31,55 +42,79 @@ export function ShareSheet({
   onClose: () => void;
   onLogin: () => void;
   onXChange: () => void;
+  onPosted: (notice: PostNotice) => void;
 }) {
   const beatIncoming = Boolean(incoming && beatScore(result.seconds, incoming.score));
-  const [query, setQuery] = useState(beatIncoming && incoming?.username ? incoming.username : "");
-  const [lookupResult, setLookupResult] = useState<{ query: string; friend: Friend | null; error: string } | null>(
+  const [query, setQuery] = useState("");
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [searchResult, setSearchResult] = useState<{ query: string; profiles: Suggestion[]; error: string } | null>(
     null
   );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [useDeso, setUseDeso] = useState(true);
   const [useX, setUseX] = useState(true);
   const [desoOverride, setDesoOverride] = useState<string | null>(null);
   const [xOverride, setXOverride] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [desoResult, setDesoResult] = useState<DestinationResult | null>(null);
-  const [xResult, setXResult] = useState<DestinationResult | null>(null);
 
   const friendName = query.trim().replace(/^@/, "");
-  const friendInvalid = friendName.length > 0 && !/^[A-Za-z0-9_]{1,25}$/.test(friendName);
-  const activeLookup = lookupResult?.query === friendName ? lookupResult : null;
+  const friendInvalid = friendName.length > 0 && !USERNAME.test(friendName);
+  const atLimit = friends.length >= MAX_FRIENDS;
+  const activeSearch = searchResult?.query === friendName ? searchResult : null;
+  const suggestions = (activeSearch?.profiles ?? []).filter(
+    (profile) =>
+      profile.publicKey !== user?.publicKey && !friends.some((friend) => friend.publicKey === profile.publicKey)
+  );
+  const highlight = suggestions.length === 0 ? 0 : Math.min(activeIndex, suggestions.length - 1);
+  const showMenu = menuOpen && friendName.length > 0 && !friendInvalid && !atLimit;
 
   useEffect(() => {
-    if (!friendName || friendInvalid) return;
+    const name = beatIncoming ? incoming?.username?.replace(/^@/, "") || "" : "";
+    if (!USERNAME.test(name)) return;
+    const controller = new AbortController();
+    void fetch(`/api/deso/profile?username=${encodeURIComponent(name)}`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = (await response.json()) as { username?: string; publicKey?: string };
+        if (!response.ok || !data.publicKey || !data.username) return;
+        const username = data.username;
+        const publicKey = data.publicKey;
+        setFriends((current) => {
+          if (current.some((friend) => friend.publicKey === publicKey) || current.length >= MAX_FRIENDS) return current;
+          return [{ username, publicKey }, ...current];
+        });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      });
+    return () => controller.abort();
+  }, [beatIncoming, incoming?.username]);
+
+  useEffect(() => {
+    if (!friendName || friendInvalid || atLimit) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void fetch(`/api/deso/profile?username=${encodeURIComponent(friendName)}`, {
-        signal: controller.signal,
-      })
+      void fetch(`/api/deso/search?q=${encodeURIComponent(friendName)}`, { signal: controller.signal })
         .then(async (response) => {
-          const data = (await response.json()) as { error?: string; username?: string; publicKey?: string };
-          if (!response.ok || !data.publicKey) throw new Error(data.error || "No DeSo profile by that name.");
-          setLookupResult({
-            query: friendName,
-            friend: { username: data.username, publicKey: data.publicKey },
-            error: "",
-          });
+          const data = (await response.json()) as { profiles?: Suggestion[]; error?: string };
+          if (!response.ok) throw new Error(data.error || "Couldn't search DeSo.");
+          setSearchResult({ query: friendName, profiles: data.profiles ?? [], error: "" });
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
-          setLookupResult({
+          setSearchResult({
             query: friendName,
-            friend: null,
-            error: error instanceof Error ? error.message : "No DeSo profile by that name.",
+            profiles: [],
+            error: error instanceof Error ? error.message : "Couldn't search DeSo.",
           });
         });
-    }, 280);
+    }, 180);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [friendInvalid, friendName]);
+  }, [atLimit, friendInvalid, friendName]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -98,13 +133,12 @@ export function ShareSheet({
           username: user?.username,
           publicKey: user?.publicKey,
         });
-  const friend = activeLookup?.friend ?? null;
-  const mention = friend?.username;
+  const mentions = friends.map((friend) => friend.username);
   const generated = buildPosts({
     seconds: result.seconds,
     near: result.nearMisses,
     link: link || "https://keep-it-alive.local/?c=pending",
-    mention,
+    mentions,
     beaten: beatIncoming && incoming ? { username: incoming.username, score: incoming.score } : undefined,
   });
   const desoText = desoOverride ?? generated.deso;
@@ -132,13 +166,15 @@ export function ShareSheet({
 
   async function post() {
     if (posting) return;
-    setDesoResult(null);
-    setXResult(null);
     if (!canPostDeso && !canPostX) {
       if (!user) onLogin();
       return;
     }
     setPosting(true);
+    const notes: string[] = [];
+    let ok = true;
+    let href: string | undefined;
+    let hrefLabel: string | undefined;
     try {
       if (canPostDeso && user) {
         try {
@@ -148,12 +184,19 @@ export function ShareSheet({
             ScoreSeconds: formatSeconds(result.seconds),
             NearMisses: String(result.nearMisses),
           };
-          if (friend?.username) extra.ChallengedUsername = friend.username;
-          if (friend?.publicKey) extra.ChallengedPublicKey = friend.publicKey;
+          if (friends.length) {
+            extra.ChallengedUsername = friends[0].username;
+            extra.ChallengedPublicKey = friends[0].publicKey;
+            extra.ChallengedUsernames = friends.map((friend) => friend.username).join(",");
+            extra.ChallengedPublicKeys = friends.map((friend) => friend.publicKey).join(",");
+          }
           const postHashHex = await publishScore(user.publicKey, desoText, extra);
-          setDesoResult({ ok: true, url: desoPostUrl(postHashHex) });
+          notes.push("Posted to DeSo.");
+          href = desoPostUrl(postHashHex);
+          hrefLabel = "View post";
         } catch (error) {
-          setDesoResult({ ok: false, error: desoErrorMessage(error) });
+          ok = false;
+          notes.push(desoErrorMessage(error));
         }
       }
       if (canPostX) {
@@ -165,13 +208,52 @@ export function ShareSheet({
           });
           const data = (await response.json()) as { url?: string; error?: string };
           if (!response.ok) throw new Error(data.error || "X rejected the post.");
-          setXResult({ ok: true, url: data.url });
+          notes.push("Posted to X.");
+          if (!href && data.url) {
+            href = data.url;
+            hrefLabel = "View post";
+          }
         } catch (error) {
-          setXResult({ ok: false, error: error instanceof Error ? error.message : "Couldn't post to X." });
+          ok = false;
+          notes.push(error instanceof Error ? error.message : "Couldn't post to X.");
         }
       }
     } finally {
       setPosting(false);
+    }
+    onPosted({ text: notes.join(" ") || "Couldn't post that score.", ok, href, hrefLabel });
+    onClose();
+  }
+
+  function addFriend(profile: Suggestion) {
+    setFriends((current) => {
+      if (current.length >= MAX_FRIENDS || current.some((friend) => friend.publicKey === profile.publicKey)) {
+        return current;
+      }
+      return [...current, profile];
+    });
+    setQuery("");
+    setMenuOpen(false);
+    setActiveIndex(0);
+  }
+
+  function onQueryKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape" && showMenu) {
+      event.stopPropagation();
+      setMenuOpen(false);
+      return;
+    }
+    if (!showMenu || suggestions.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((index) => (index + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const pick = suggestions[highlight];
+      if (pick) addFriend(pick);
     }
   }
 
@@ -198,30 +280,90 @@ export function ShareSheet({
               : "Friends who open the link have to beat this time."}
         </p>
 
-        <label className="field">
-          <span>Challenge a DeSo friend</span>
-          <input
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setDesoOverride(null);
-            }}
-            placeholder="username"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-        </label>
-        {friendInvalid && <p className="hint warn">Use letters, numbers, or underscores.</p>}
-        {friendName && !friendInvalid && !activeLookup && <p className="hint">Looking up that profile…</p>}
-        {activeLookup?.error && <p className="hint warn">{activeLookup.error}</p>}
-        {friend && (
-          <div className="friend">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={profilePictureUrl(friend.publicKey, friend.username)} alt="" width={28} height={28} />
-            <span>{friend.username ? `@${friend.username}` : "DeSo profile"} will be mentioned on DeSo.</span>
+        <div className="field">
+          <span>Challenge DeSo friends</span>
+          {friends.length > 0 && (
+            <div className="chips">
+              {friends.map((friend) => (
+                <span className="chip" key={friend.publicKey}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={profilePictureUrl(friend.publicKey, friend.username)} alt="" width={22} height={22} />
+                  <span>@{friend.username}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove @${friend.username}`}
+                    onClick={() => setFriends((current) => current.filter((item) => item.publicKey !== friend.publicKey))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="suggest">
+            <input
+              value={query}
+              role="combobox"
+              aria-expanded={showMenu}
+              aria-controls="friend-results"
+              aria-autocomplete="list"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setMenuOpen(true);
+                setActiveIndex(0);
+              }}
+              onFocus={() => setMenuOpen(true)}
+              onKeyDown={onQueryKeyDown}
+              placeholder={atLimit ? "8 friends is the limit" : "Search DeSo usernames"}
+              disabled={atLimit}
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {showMenu && (
+              <ul className="suggest-list" id="friend-results" role="listbox">
+                {!activeSearch && <li className="suggest-status">Searching DeSo…</li>}
+                {activeSearch?.error && <li className="suggest-status">{activeSearch.error}</li>}
+                {activeSearch && !activeSearch.error && suggestions.length === 0 && (
+                  <li className="suggest-status">
+                    {activeSearch.profiles.length > 0 &&
+                    activeSearch.profiles.every((profile) => profile.publicKey === user?.publicKey)
+                      ? "That profile is you."
+                      : activeSearch.profiles.length > 0
+                        ? "Those profiles are already added."
+                        : "No matching profiles."}
+                  </li>
+                )}
+                {suggestions.map((profile, index) => (
+                  <li key={profile.publicKey}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={index === highlight}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => addFriend(profile)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={profilePictureUrl(profile.publicKey, profile.username)}
+                        alt=""
+                        width={32}
+                        height={32}
+                      />
+                      <span className="suggest-copy">
+                        <strong>@{profile.username}</strong>
+                        {profile.description && <small>{profile.description}</small>}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        )}
+        </div>
+        {friendInvalid && <p className="hint warn">Use letters, numbers, or underscores.</p>}
 
         <div className="destinations">
           <label className={`check ${user ? "" : "off"}`}>
@@ -302,28 +444,6 @@ export function ShareSheet({
           </button>
         </div>
         {canPostX && xTooLong && <p className="hint warn">Shorten the X post to 280 characters.</p>}
-        {desoResult && (
-          <p className={desoResult.ok ? "hint good" : "hint warn"}>
-            {desoResult.ok ? (
-              <a href={desoResult.url} target="_blank" rel="noopener noreferrer">
-                View on DeSo
-              </a>
-            ) : (
-              desoResult.error
-            )}
-          </p>
-        )}
-        {xResult && (
-          <p className={xResult.ok ? "hint good" : "hint warn"}>
-            {xResult.ok ? (
-              <a href={xResult.url} target="_blank" rel="noopener noreferrer">
-                View on X
-              </a>
-            ) : (
-              xResult.error
-            )}
-          </p>
-        )}
       </div>
     </div>
   );

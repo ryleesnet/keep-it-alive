@@ -1,6 +1,6 @@
 import { connection, NextRequest, NextResponse } from "next/server";
 import { APP_TAG } from "@/lib/constants";
-import { desoNode, PUBLIC_KEY } from "@/lib/deso-node";
+import { desoNode, PUBLIC_KEY, USERNAME } from "@/lib/deso-node";
 import type { PostedScore } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
@@ -52,14 +52,24 @@ function toScore(post: RawPost): PostedScore | null {
   const score = Number(extra.ScoreSeconds);
   if (!Number.isFinite(score) || score < 0) return null;
   const near = Number(extra.NearMisses ?? 0);
-  const challenged = extra.ChallengedUsername?.trim().replace(/^@/, "");
+  const challengedUsernames = challengedNames(extra);
   return {
     postHashHex: post.PostHashHex,
     score,
     near: Number.isFinite(near) ? Math.max(0, Math.round(near)) : 0,
-    challengedUsername: challenged || undefined,
+    challengedUsername: challengedUsernames[0],
+    challengedUsernames: challengedUsernames.length ? challengedUsernames : undefined,
     createdAt: nanosToIso(post.TimestampNanos),
   };
+}
+
+function challengedNames(extra: Record<string, string>): string[] {
+  const many = extra.ChallengedUsernames?.split(",")
+    .map((name) => name.trim().replace(/^@/, ""))
+    .filter((name) => USERNAME.test(name));
+  if (many && many.length) return many;
+  const one = extra.ChallengedUsername?.trim().replace(/^@/, "") || "";
+  return USERNAME.test(one) ? [one] : [];
 }
 
 function nanosToIso(value: number | string | undefined): string | null {

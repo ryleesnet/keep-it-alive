@@ -84,7 +84,9 @@ export function ScoresDialog({
                   <span>
                     {score.near} near misses
                     {score.createdAt ? ` · ${formatWhen(score.createdAt)}` : ""}
-                    {score.challengedUsername ? ` · challenged @${score.challengedUsername}` : ""}
+                    {score.challengedUsernames?.length
+                      ? ` · challenged ${score.challengedUsernames.map((name) => `@${name}`).join(", ")}`
+                      : ""}
                   </span>
                 </div>
                 <div className="actions tight">

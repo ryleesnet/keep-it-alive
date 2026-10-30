@@ -29,6 +29,7 @@ export type PostedScore = {
   score: number;
   near: number;
   challengedUsername?: string;
+  challengedUsernames?: string[];
   createdAt: string | null;
 };
 

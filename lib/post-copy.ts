@@ -4,12 +4,16 @@ export function buildPosts(input: {
   seconds: number;
   near: number;
   link: string;
-  mention?: string;
+  mentions?: string[];
   beaten?: { username?: string; score: number };
 }): { deso: string; x: string } {
   const time = formatSeconds(input.seconds);
   const near = Math.max(0, Math.round(input.near));
-  const mention = input.mention?.replace(/^@/, "");
+  const beatenName = input.beaten?.username?.replace(/^@/, "").toLowerCase();
+  const mentions = (input.mentions ?? [])
+    .map((name) => name.replace(/^@/, ""))
+    .filter((name) => name && name.toLowerCase() !== beatenName);
+  const tags = mentions.map((name) => `@${name}`).join(" ");
   const lines = [
     `I kept it alive for ${time} seconds in KEEP IT ALIVE.`,
     "",
@@ -21,9 +25,9 @@ export function buildPosts(input: {
       ? `@${input.beaten.username.replace(/^@/, "")}`
       : "The last mark";
     lines.push(`${who} held ${formatSeconds(input.beaten.score)}s. I went longer.`);
-    lines.push(mention ? `@${mention} — can you take the lead?` : "Can you top it?");
-  } else if (mention) {
-    lines.push(`@${mention} — can you beat ${time}s?`);
+    lines.push(tags ? `${tags} — can you take the lead?` : "Can you top it?");
+  } else if (tags) {
+    lines.push(`${tags} — can you beat ${time}s?`);
   } else {
     lines.push("Can you beat me?");
   }
