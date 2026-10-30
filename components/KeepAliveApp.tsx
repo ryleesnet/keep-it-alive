@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { GameCanvas, type GameHandle } from "@/components/GameCanvas";
 import { HighScoresDialog } from "@/components/HighScoresDialog";
 import { ScoresDialog } from "@/components/ScoresDialog";
+import { SocialDialog } from "@/components/SocialDialog";
 import { ShareSheet, type PostNotice } from "@/components/ShareSheet";
 import { challengeFromParams, decodeChallenge } from "@/lib/challenge";
 import {
@@ -69,6 +70,7 @@ export function KeepAliveApp() {
   const [share, setShare] = useState<RunResult | null>(null);
   const [scoresOpen, setScoresOpen] = useState(false);
   const [highScoresOpen, setHighScoresOpen] = useState(false);
+  const [socialOpen, setSocialOpen] = useState(false);
   const [user, setUser] = useState<DesoUser | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
@@ -96,8 +98,8 @@ export function KeepAliveApp() {
   }
 
   useEffect(() => {
-    allowHotkeysRef.current = !share && !scoresOpen && !highScoresOpen;
-  }, [share, scoresOpen, highScoresOpen]);
+    allowHotkeysRef.current = !share && !scoresOpen && !highScoresOpen && !socialOpen;
+  }, [share, scoresOpen, highScoresOpen, socialOpen]);
 
   useEffect(() => {
     if (best.seconds <= 0) return;
@@ -195,6 +197,7 @@ export function KeepAliveApp() {
       setShare(null);
       setScoresOpen(false);
       setHighScoresOpen(false);
+      setSocialOpen(false);
       setAccountOpen(false);
     }
   }
@@ -256,6 +259,9 @@ export function KeepAliveApp() {
               Scores
             </button>
           )}
+          <button className="secondary slim" type="button" onClick={() => setSocialOpen(true)}>
+            Social
+          </button>
           {xStatus.configured &&
             (xStatus.connected ? (
               <span className="pill">X · @{xStatus.username}</span>
@@ -470,6 +476,9 @@ export function KeepAliveApp() {
         />
       )}
       {scoresOpen && user && <ScoresDialog user={user} onClose={() => setScoresOpen(false)} />}
+      {socialOpen && (
+        <SocialDialog user={user} onClose={() => setSocialOpen(false)} onLogin={() => void login()} />
+      )}
       {highScoresOpen && (
         <HighScoresDialog
           youIds={[

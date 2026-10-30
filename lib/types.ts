@@ -38,3 +38,27 @@ export type DesoProfile = {
   publicKey: string;
   description?: string;
 };
+
+export type SocialPost = {
+  postHashHex: string;
+  publicKey: string;
+  username?: string;
+  score: number | null;
+  near: number;
+  body: string;
+  images: string[];
+  createdAt: string | null;
+  likeCount: number;
+  diamondCount: number;
+  commentCount: number;
+  likedByReader: boolean;
+  diamondLevel: number;
+};
+
+export type SocialComment = {
+  postHashHex: string;
+  publicKey: string;
+  username?: string;
+  body: string;
+  createdAt: string | null;
+};

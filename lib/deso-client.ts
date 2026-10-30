@@ -1,3 +1,4 @@
+import { APP_TAG } from "@/lib/constants";
 import type { DesoUser } from "@/lib/types";
 
 const IDENTITY_USERS_KEY = "desoIdentityUsers";
@@ -23,10 +24,12 @@ async function readySdk(): Promise<Sdk> {
       showSkip: true,
       nodeURI: process.env.NEXT_PUBLIC_DESO_NODE_URI || "https://node.deso.org",
       spendingLimitOptions: {
-        GlobalDESOLimit: 20_000_000,
+        GlobalDESOLimit: 200_000_000,
         TransactionCountLimitMap: {
           [sdk.TransactionType.AuthorizeDerivedKey]: 2,
           [sdk.TransactionType.SubmitPost]: 100,
+          [sdk.TransactionType.Like]: 100,
+          [sdk.TransactionType.BasicTransfer]: 40,
         },
       },
     });
@@ -125,10 +128,100 @@ export async function publishScore(
   return postHashHex;
 }
 
+export async function setPostLike(publicKey: string, postHashHex: string, unlike: boolean): Promise<void> {
+  const { updateLikeStatus } = await readySdk();
+  const result = await updateLikeStatus({
+    ReaderPublicKeyBase58Check: publicKey,
+    LikedPostHashHex: postHashHex,
+    IsUnlike: unlike,
+    MinFeeRateNanosPerKB: 1000,
+  });
+  if (!result.submittedTransactionResponse) {
+    throw new Error("DeSo didn't save that like. Approve the prompt and try again.");
+  }
+}
+
+export async function sendPostDiamonds(
+  senderPublicKey: string,
+  receiverPublicKey: string,
+  postHashHex: string,
+  level: number
+): Promise<void> {
+  const { sendDiamonds } = await readySdk();
+  const result = await sendDiamonds({
+    SenderPublicKeyBase58Check: senderPublicKey,
+    ReceiverPublicKeyBase58Check: receiverPublicKey,
+    DiamondPostHashHex: postHashHex,
+    DiamondLevel: level,
+    MinFeeRateNanosPerKB: 1000,
+  });
+  if (!result.submittedTransactionResponse) {
+    throw new Error("DeSo didn't send those diamonds. Approve the prompt and try again.");
+  }
+}
+
+export async function publishSocialPost(
+  publicKey: string,
+  body: string,
+  files: File[]
+): Promise<{ postHashHex: string; body: string; imageUrls: string[] }> {
+  const { submitPost, uploadImage } = await readySdk();
+  const imageUrls: string[] = [];
+  for (const file of files) {
+    const uploaded = await uploadImage({
+      UserPublicKeyBase58Check: publicKey,
+      file,
+    });
+    if (!uploaded.ImageURL) throw new Error("DeSo didn't accept that photo.");
+    imageUrls.push(uploaded.ImageURL);
+  }
+  const text = body.trim();
+  const withTag = text.includes("#KeepItAlive") ? text : text ? `${text}\n\n#KeepItAlive` : "#KeepItAlive";
+  const result = await submitPost({
+    UpdaterPublicKeyBase58Check: publicKey,
+    BodyObj: { Body: withTag, ImageURLs: imageUrls, VideoURLs: [] },
+    PostExtraData: { App: APP_TAG, Version: "1", Kind: "note" },
+    MinFeeRateNanosPerKB: 1000,
+  });
+  const submitted = result.submittedTransactionResponse?.PostEntryResponse?.PostHashHex;
+  const constructed =
+    result.constructedTransactionResponse &&
+    "PostHashHex" in result.constructedTransactionResponse
+      ? result.constructedTransactionResponse.PostHashHex
+      : undefined;
+  const postHashHex = submitted || constructed;
+  if (!postHashHex || !result.submittedTransactionResponse) {
+    throw new Error("DeSo didn't publish that post. Approve the prompt and try again.");
+  }
+  return { postHashHex, body: withTag, imageUrls };
+}
+
+export async function commentOnPost(publicKey: string, parentPostHashHex: string, body: string): Promise<string> {
+  const { submitPost } = await readySdk();
+  const result = await submitPost({
+    UpdaterPublicKeyBase58Check: publicKey,
+    ParentStakeID: parentPostHashHex,
+    BodyObj: { Body: body, ImageURLs: [], VideoURLs: [] },
+    PostExtraData: { App: APP_TAG, Version: "1" },
+    MinFeeRateNanosPerKB: 1000,
+  });
+  const submitted = result.submittedTransactionResponse?.PostEntryResponse?.PostHashHex;
+  const constructed =
+    result.constructedTransactionResponse &&
+    "PostHashHex" in result.constructedTransactionResponse
+      ? result.constructedTransactionResponse.PostHashHex
+      : undefined;
+  const postHashHex = submitted || constructed;
+  if (!postHashHex || !result.submittedTransactionResponse) {
+    throw new Error("DeSo didn't post that chat. Approve the prompt and try again.");
+  }
+  return postHashHex;
+}
+
 export function desoErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Couldn't reach DeSo.";
   if (/sufficient|insufficient|balance|funds/i.test(message)) {
-    return "Posting needs a small DESO balance for the network fee.";
+    return "That needs DESO in the wallet. Diamonds cost more than a like.";
   }
   if (/permission|spending limit|derived key/i.test(message)) {
     return "Approve the DeSo posting permission, then try again.";
