@@ -19,6 +19,18 @@ type Props = {
 type Hazard = { x: number; y: number; vx: number; vy: number; r: number; phase: number };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; r: number };
 type Star = { x: number; y: number; a: number; r: number };
+type Wall = {
+  nx: number;
+  ny: number;
+  tx: number;
+  ty: number;
+  offset: number;
+  speed: number;
+  exit: number;
+  gap0: number;
+  gap1: number;
+  thickness: number;
+};
 
 type Sim = {
   phase: "intro" | "playing" | "over";
@@ -33,6 +45,8 @@ type Sim = {
   particles: Particle[];
   stars: Star[];
   spawn: number;
+  walls: Wall[];
+  wallIn: number;
   shake: number;
   frame: number;
   nearCooldown: number;
@@ -75,6 +89,8 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       particles: [],
       stars: [],
       spawn: 0.45,
+      walls: [],
+      wallIn: 4,
       shake: 0,
       frame: 0,
       nearCooldown: 0,
@@ -131,8 +147,11 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
     const addHazard = () => {
       const hard = sim.desktop;
       const edge = Math.floor(Math.random() * 4);
-      const pad = 18;
+      const r = hard ? 6 + Math.random() * 6 : 5 + Math.random() * 5;
+      // Keep the whole disc outside, including the step taken before the first paint.
+      const pad = r + 16;
       const sideAim = hard ? 0.02 : 0.012;
+      const inward = hard ? 1.25 + Math.random() : 1.1 + Math.random();
       let x = 0;
       let y = 0;
       let vx = 0;
@@ -140,22 +159,22 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       if (edge === 0) {
         x = Math.random() * sim.W;
         y = -pad;
-        vx = (sim.player.x - x) * (hard ? 0.15 + Math.random() * 0.06 : 0.12 + Math.random() * 0.06);
+        vx = (sim.player.x - x) * sideAim;
         vy = hard ? 1.2 + Math.random() * 0.85 : 1 + Math.random() * 0.7;
       } else if (edge === 1) {
         x = sim.W + pad;
         y = Math.random() * sim.H;
-        vx = -(hard ? 1.25 + Math.random() : 1.1 + Math.random());
+        vx = -inward;
         vy = (sim.player.y - y) * sideAim;
       } else if (edge === 2) {
         x = Math.random() * sim.W;
         y = sim.H + pad;
         vx = (sim.player.x - x) * sideAim;
-        vy = -(hard ? 1.25 + Math.random() : 1.1 + Math.random());
+        vy = -inward;
       } else {
         x = -pad;
         y = Math.random() * sim.H;
-        vx = hard ? 1.25 + Math.random() : 1.1 + Math.random();
+        vx = inward;
         vy = (sim.player.y - y) * sideAim;
       }
       const speed = hard ? 1.15 + Math.min(sim.elapsed / 22, 3) : 1 + Math.min(sim.elapsed / 28, 2.5);
@@ -164,9 +183,106 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
         y,
         vx: vx * speed,
         vy: vy * speed,
-        r: hard ? 6 + Math.random() * 6 : 5 + Math.random() * 5,
+        r,
         phase: Math.random() * 6.28,
       });
+    };
+
+    const wallKind = (wall: Wall) => {
+      if (Math.abs(wall.nx) < 0.15) return "h";
+      if (Math.abs(wall.ny) < 0.15) return "v";
+      return "d";
+    };
+
+    const wallSpan = (wall: Pick<Wall, "nx" | "ny" | "tx" | "ty">, offset: number, bleed = 0) => {
+      let t0 = -1e9;
+      let t1 = 1e9;
+      const x0 = wall.nx * offset;
+      const y0 = wall.ny * offset;
+      const clip = (p: number, q: number) => {
+        if (Math.abs(p) < 1e-6) return q >= -0.5;
+        const r = q / p;
+        if (p < 0) {
+          if (r > t1) return false;
+          if (r > t0) t0 = r;
+        } else {
+          if (r < t0) return false;
+          if (r < t1) t1 = r;
+        }
+        return true;
+      };
+      if (!clip(-wall.tx, x0 + bleed)) return null;
+      if (!clip(wall.tx, sim.W + bleed - x0)) return null;
+      if (!clip(-wall.ty, y0 + bleed)) return null;
+      if (!clip(wall.ty, sim.H + bleed - y0)) return null;
+      if (t1 - t0 < 8) return null;
+      return [t0, t1] as const;
+    };
+
+    const addWall = () => {
+      if (sim.walls.length >= 2 || sim.W < 40 || sim.H < 40) return;
+      const kinds = ["h", "v", "d"] as const;
+      const used = new Set(sim.walls.map(wallKind));
+      let kind = kinds[Math.floor(Math.random() * kinds.length)];
+      if (sim.walls.length === 1 && used.has(kind)) {
+        const open = kinds.filter((item) => !used.has(item));
+        kind = open[Math.floor(Math.random() * open.length)];
+      }
+      const flip = Math.random() < 0.5 ? 0 : Math.PI;
+      const tilt = [Math.PI / 6, Math.PI / 4, Math.PI / 3][Math.floor(Math.random() * 3)];
+      const angle =
+        kind === "h"
+          ? Math.PI / 2 + flip
+          : kind === "v"
+            ? flip
+            : (Math.random() < 0.5 ? tilt : -tilt) + flip;
+      const basis = {
+        nx: Math.cos(angle),
+        ny: Math.sin(angle),
+        tx: -Math.sin(angle),
+        ty: Math.cos(angle),
+      };
+      let minN = Infinity;
+      let maxN = -Infinity;
+      for (const x of [0, sim.W]) {
+        for (const y of [0, sim.H]) {
+          const dot = x * basis.nx + y * basis.ny;
+          minN = Math.min(minN, dot);
+          maxN = Math.max(maxN, dot);
+        }
+      }
+      const center = wallSpan(basis, (sim.W / 2) * basis.nx + (sim.H / 2) * basis.ny);
+      if (!center) return;
+      const span = center[1] - center[0];
+      const minGap = Math.min(sim.player.r * 2 + 56, Math.max(sim.player.r * 2 + 28, span * 0.55));
+      const maxGap = Math.max(minGap, Math.min(span * 0.48, minGap + (sim.desktop ? 110 : 72)));
+      let gap = minGap + Math.random() * (maxGap - minGap);
+      const side = Math.max(18, Math.min(42, (span - gap) * 0.28));
+      if (gap + side * 2 > span) gap = Math.max(sim.player.r * 2 + 28, span - side * 2);
+      const slack = Math.max(0, span - side * 2 - gap);
+      const gap0 = center[0] + side + Math.random() * slack;
+      const rush = Math.min(sim.elapsed / 45, 1);
+      const minSeconds = (sim.desktop ? 4.2 : 4.8) - rush * 1.1;
+      const maxSeconds = (sim.desktop ? 8 : 8.6) - rush * 1.4;
+      const seconds = minSeconds + Math.random() * Math.max(0.4, maxSeconds - minSeconds);
+      const lead = 36;
+      sim.walls.push({
+        ...basis,
+        offset: minN - lead,
+        speed: (maxN - minN + lead * 2) / seconds,
+        exit: maxN + lead,
+        gap0,
+        gap1: gap0 + gap,
+        thickness: 14,
+      });
+    };
+
+    const wallHits = (wall: Wall) => {
+      const player = sim.player;
+      const across = player.x * wall.nx + player.y * wall.ny;
+      const along = player.x * wall.tx + player.y * wall.ty;
+      if (Math.abs(across - wall.offset) > wall.thickness * 0.5 + player.r) return false;
+      return along < wall.gap0 + player.r || along > wall.gap1 - player.r;
     };
 
     const hazardCount = () => {
@@ -183,6 +299,8 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
       sim.spawn = sim.desktop ? 0.28 : 0.45;
       sim.hazards = [];
       sim.particles = [];
+      sim.walls = [];
+      sim.wallIn = 1.7 + Math.random() * 1.5;
       sim.shake = 0;
       sim.nearCooldown = 0;
       sim.player = {
@@ -205,6 +323,7 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
         publishBest(shown, sim.near);
       }
       sim.phase = "over";
+      sim.walls = [];
       sim.shake = 8;
       burst(sim.player.x, sim.player.y, "#67f4e2", 30);
       onHudRef.current(sim.elapsed, sim.near);
@@ -318,6 +437,41 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
         ctx.arc(hazard.x, hazard.y, hazard.r * 0.42, 0, Math.PI * 2);
         ctx.fill();
       }
+      if (sim.phase === "playing") {
+        for (const wall of sim.walls) {
+          const span = wallSpan(wall, wall.offset, 24);
+          if (!span) continue;
+          const from = span[0] - 12;
+          const to = span[1] + 12;
+          const parts: Array<[number, number]> = [
+            [from, Math.min(wall.gap0, to)],
+            [Math.max(wall.gap1, from), to],
+          ];
+          for (const [t0, t1] of parts) {
+            if (t1 - t0 < 1) continue;
+            const x1 = wall.nx * wall.offset + wall.tx * t0;
+            const y1 = wall.ny * wall.offset + wall.ty * t0;
+            const x2 = wall.nx * wall.offset + wall.tx * t1;
+            const y2 = wall.ny * wall.offset + wall.ty * t1;
+            ctx.save();
+            ctx.translate(x1, y1);
+            ctx.rotate(Math.atan2(y2 - y1, x2 - x1));
+            const length = t1 - t0;
+            const half = 16;
+            const glow = ctx.createLinearGradient(0, -half, 0, half);
+            glow.addColorStop(0, "rgba(255, 24, 52, 0)");
+            glow.addColorStop(0.22, "rgba(255, 32, 60, 0.22)");
+            glow.addColorStop(0.4, "rgba(255, 36, 64, 0.95)");
+            glow.addColorStop(0.5, "#ff2748");
+            glow.addColorStop(0.6, "rgba(255, 36, 64, 0.95)");
+            glow.addColorStop(0.78, "rgba(255, 32, 60, 0.22)");
+            glow.addColorStop(1, "rgba(255, 24, 52, 0)");
+            ctx.fillStyle = glow;
+            ctx.fillRect(0, -half, length, half * 2);
+            ctx.restore();
+          }
+        }
+      }
       for (let i = sim.particles.length - 1; i >= 0; i -= 1) {
         const particle = sim.particles[i];
         particle.x += particle.vx;
@@ -411,6 +565,46 @@ export const GameCanvas = forwardRef<GameHandle, Props>(function GameCanvas(
             burst(sim.player.x, sim.player.y, "#67f4e2", 5);
             onHudRef.current(sim.elapsed, sim.near);
             hudAt = now;
+          }
+        }
+        if (sim.phase === "playing") {
+          for (let i = sim.walls.length - 1; i >= 0; i -= 1) {
+            const wall = sim.walls[i];
+            wall.offset += wall.speed * dt;
+            if (wall.offset > wall.exit) {
+              sim.walls.splice(i, 1);
+              continue;
+            }
+            if (wallHits(wall)) {
+              burst(sim.player.x, sim.player.y, "#ff335c", 28);
+              finish();
+              break;
+            }
+            if (sim.nearCooldown <= 0) {
+              const along = sim.player.x * wall.tx + sim.player.y * wall.ty;
+              const across = Math.abs(sim.player.x * wall.nx + sim.player.y * wall.ny - wall.offset);
+              const reach = wall.thickness * 0.5 + sim.player.r;
+              const edge = Math.min(Math.abs(along - wall.gap0), Math.abs(along - wall.gap1));
+              const threading = along > wall.gap0 && along < wall.gap1 && edge < sim.player.r + 18 && across < reach + 10;
+              const skimming = (along < wall.gap0 || along > wall.gap1) && across > reach && across < reach + 14;
+              if (threading || skimming) {
+                sim.near += 1;
+                sim.nearCooldown = 0.38;
+                burst(sim.player.x, sim.player.y, "#67f4e2", 5);
+                onHudRef.current(sim.elapsed, sim.near);
+                hudAt = now;
+              }
+            }
+          }
+          if (sim.phase === "playing") {
+            if (sim.walls.length >= 2) sim.wallIn = Math.max(sim.wallIn, 0.45);
+            else {
+              sim.wallIn -= dt;
+              if (sim.wallIn <= 0) {
+                addWall();
+                sim.wallIn = sim.walls.length >= 2 ? 0.7 + Math.random() : 1.2 + Math.random() * 2.2;
+              }
+            }
           }
         }
         if (now - hudAt > 100) {
